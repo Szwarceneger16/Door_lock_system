@@ -5,7 +5,6 @@
 ### C++ ###
 # Prerequisites
 *.d
-./door_lock_system/
 
 # Compiled Object files
 *.slo
