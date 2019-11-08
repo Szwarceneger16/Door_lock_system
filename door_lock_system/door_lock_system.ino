@@ -5,6 +5,7 @@
 */
 
 // the setup function runs once when you press reset or power the board
+#include <SD.h>
 #include <require_cpp11.h>
 #include <MFRC522Extended.h>
 #include <MFRC522.h>
@@ -13,37 +14,65 @@
 #include <SPI.h>
 #include <EEPROM.h>
 
-#define SS_PIN 8 
-#define RST_PIN 9
+#define MFRC_SS_PIN 8 
+#define MFRC_RST_PIN 9
+#define RESET_TIME 86400000
+#define SD_SS_PIN 4
+#define START_ADR 3
+
+#define _PIN_A 14 
+#define _PIN_B 15
+#define _PIN_C 16
+
+struct _log {
+	uint8_t sec;
+	uint8_t min;
+	uint8_t hour;
+	uint16_t day;
+	byte uid[4];
+}str;
+
+void(*resetFunc) (void) = 0;
 
 void set_led(uint8_t);
 boolean check_user();
 boolean check_admin();
 void add_user();
-void open_door();
+void date_format();
+void write_log(String);
+inline void blink_led(uint8_t wej) { digitalWrite(wej, !digitalRead(wej)); }
+
 
 const byte admin_master[4] = {0x13,0x01,0x8D,0x73};
 const byte admin_slave[4] = {};
 
-int adr_save = 1;
+int adr_save = START_ADR;
 
-MFRC522 mfrc522(SS_PIN, RST_PIN);
+MFRC522 mfrc522(MFRC_SS_PIN, MFRC_RST_PIN);
 //          //          //          //          //          //
 void setup() {
-	pinMode(2, INPUT_PULLUP);
-	pinMode(3, INPUT_PULLUP);
-	pinMode(4, INPUT_PULLUP);
+	pinMode(_PIN_A, INPUT_PULLUP);
+	pinMode(_PIN_B, INPUT_PULLUP);
+	pinMode(_PIN_C, INPUT_PULLUP);
 	pinMode(5, OUTPUT);
 	pinMode(6, OUTPUT);
 	pinMode(7, OUTPUT);
-	pinMode(14, OUTPUT);
-
-	if (EEPROM.read(0) != 255) adr_save = EEPROM.read(0);
+	pinMode(SD_SS_PIN, OUTPUT);
+	pinMode(MFRC_SS_PIN, OUTPUT);
 
 	
+
+	if (EEPROM.read(0) > 1) adr_save = EEPROM.read(0);
+	EEPROM.get(1,str.day);
+
 	Serial.begin(9600);
 	SPI.begin();
+	
 	mfrc522.PCD_Init();
+
+	delay(5);
+	/*digitalWrite(SD_SS_PIN, HIGH);
+	digitalWrite(MFRC_SS_PIN, LOW);*/
 }
 
 //          //          //          //          //          //
@@ -51,11 +80,17 @@ void loop()
 {
 	while (true)
 	{
-		if (!digitalRead(2)) { set_led(2); }
-		else if (!digitalRead(3)) { set_led(3); }
-		else if (!digitalRead(4)) { set_led(4); }
-		//else set_led(10);
+		if (millis() >= RESET_TIME) 
+		{
+			EEPROM.put(1,EEPROM.get(1, str.day)+1);
+			resetFunc(); 
+		}
 
+		if (!digitalRead(_PIN_C)) { set_led(_PIN_C); }
+		else if (!digitalRead(_PIN_B)) { set_led(_PIN_B); }
+		else if (!digitalRead(_PIN_A)) { set_led(_PIN_A); }
+		//else set_led(10);
+		
 		if (mfrc522.PICC_IsNewCardPresent()) {
 			break;
 		}
@@ -65,7 +100,7 @@ void loop()
 		return;
 	}
 
-	if (!digitalRead(2))
+	if (!digitalRead(_PIN_A))
 	{
 		Serial.println(F("Scanned PICC's UID:"));
 		for (uint8_t i = 0; i < 4; i++) Serial.print(mfrc522.uid.uidByte[i], HEX);
@@ -74,21 +109,32 @@ void loop()
 	{
 		if (check_admin())
 		{
-			if (!digitalRead(4))
+			if (!digitalRead(_PIN_C))
 			{
+				mfrc522.PICC_HaltA();
 				add_user();
 			}
 			else
 			{
+				write_log("ACCEPTED");
 				//open door
 				Serial.println("otwieram");
+				delay(3000);
 			}
 		}
 		else
 		{
-			if (!digitalRead(3))
+			if (!digitalRead(_PIN_B))
 			{
-				if (check_user()) { Serial.println("otwieram"); }
+				if (check_user()) 
+				{ 
+					Serial.println("otwieram");
+					write_log("ACCEPTED");
+				}
+				else
+				{
+					write_log("DENIED");
+				}
 			}
 		}
 	}
@@ -101,17 +147,17 @@ void set_led(uint8_t wej)
 {
 	switch (wej)
 	{
-	case 2:
+	case 16:
 		digitalWrite(5, HIGH);
 		digitalWrite(6, LOW);
 		digitalWrite(7, LOW);
 		break;
-	case 3:
+	case 15:
 		digitalWrite(5, LOW);
 		digitalWrite(6, HIGH);
 		digitalWrite(7, LOW);
 		break;
-	case 4:
+	case 14:
 		digitalWrite(5, LOW);
 		digitalWrite(6, LOW);
 		digitalWrite(7, HIGH);
@@ -124,6 +170,16 @@ void set_led(uint8_t wej)
 	}
 }
 
+void date_format()
+{
+	unsigned long time = millis();
+
+	str.sec = ((time / 1000) % 60);
+	str.min = ((time / (60000)) % 60);
+	str.hour = ((time / (3600000)) % 24);
+}
+
+
 boolean check_admin()
 {
 	for (uint8_t i = 0; i < 4; i++) {  //
@@ -132,11 +188,49 @@ boolean check_admin()
 	return true;
 }
 
+void write_log(String acces)
+{
+	/*digitalWrite(MFRC_SS_PIN, HIGH);
+	digitalWrite(SD_SS_PIN, LOW);
+	delay(10);*/
+
+	File ACCES_LOG;
+
+	date_format();
+	
+	
+	if (SD.exists("log.txt"))
+	{
+		ACCES_LOG = SD.open("log.txt", O_APPEND);
+	}
+	else
+	{
+		ACCES_LOG = SD.open("log.txt", O_WRITE);
+	}
+
+	ACCES_LOG.print(str.day);
+	ACCES_LOG.print("   ");
+	ACCES_LOG.print(str.hour);
+	ACCES_LOG.print("   ");
+	ACCES_LOG.print(str.min);
+	ACCES_LOG.print("   ");
+	ACCES_LOG.print(str.sec);
+	ACCES_LOG.print("  --");
+	ACCES_LOG.println(acces);
+
+
+	ACCES_LOG.close();
+
+	/*digitalWrite(MFRC_SS_PIN, HIGH);
+	digitalWrite(SD_SS_PIN, LOW);
+	delay(10);*/
+}
+
 boolean check_user()
 {
-	int adr_read = 1;
+	int adr_read = START_ADR;
 	boolean flag;
-	for (size_t i = 0; i < adr_save; i++)
+	while (adr_read < adr_save)
 	{
 		flag = true;
 		for (uint8_t i = 0; i < 4; i++) {
@@ -145,15 +239,25 @@ boolean check_user()
 				break;
 			}
 		}
-		adr_read+=4;
-		if (flag) { break; }
+		adr_read += 4;
+		if (flag) { return true; }
 	}
-	return flag;
+	
+	return false;
 }
 
 void add_user()
 {
-	if (!check_admin)
+	unsigned long now = millis(),now2 = millis();
+	while (!mfrc522.PICC_IsNewCardPresent()) 
+	{
+		if ((millis() - now) > 10000) return;
+		if ((millis() - now2) > 500) blink_led(14); now2 = millis();
+	}
+	mfrc522.PICC_ReadCardSerial();
+	
+
+	if (!check_admin() && !check_user() && adr_save < 202)
 	{
 		for (uint8_t i = 0; i < 4; i++)
 		{
