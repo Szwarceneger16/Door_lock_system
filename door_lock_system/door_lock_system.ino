@@ -69,6 +69,10 @@ void setup() {
 	SPI.begin();
 	
 	mfrc522.PCD_Init();
+	delay(20);
+	if (!SD.begin(4)) {
+		Serial.println("initialization failed!");
+	}
 
 	delay(5);
 	/*digitalWrite(SD_SS_PIN, HIGH);
