@@ -43,7 +43,7 @@ void write_log(String);
 inline void blink_led(uint8_t wej) { digitalWrite(wej, !digitalRead(wej)); }
 
 
-const byte admin_master[4] = {0x13,0x01,0x8D,0x73};
+const byte admin_master[4] = {0x00,0x00,0x00,0x00};
 const byte admin_slave[4] = {};
 
 int adr_save = START_ADR;
